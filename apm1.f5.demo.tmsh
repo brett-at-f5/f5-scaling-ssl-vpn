@@ -1,0 +1,118 @@
+## Scaling SSL VPN using BIG-IP Local Traffic Manager (LTM) ##
+## Example Configuration ##
+# APM 1:
+#   Hostname: apm1.f5.demo
+#   Management IP: 10.1.1.121 /24
+#   3x VLANs:
+#     External:
+#       Name: vlan502
+#       Self IP: 10.50.2.11 /24
+#     Internal:
+#       Name: vlan503
+#       Self IP: 10.50.3.11 /24
+
+
+## apm1.f5.demo ##
+# Set Static MGMT IP
+modify sys global-settings mgmt-dhcp disabled
+delete sys management-route default
+create sys management-route default gateway 10.1.1.254
+create sys management-ip 10.1.1.121/24 description none
+
+# Disable GUI Setup
+modify sys global-settings gui-setup disabled
+
+# Change Records per screen from 10 to 50
+modify sys db ui.system.preferences.recordsperscreen { value 50 }
+
+# Hostname
+modify sys global-settings hostname apm1.f5.demo
+
+# Create dot1Q tagged VLANs - External / Internal
+create net vlan vlan502 interfaces add { 1.1 } tag 502
+create net vlan vlan503 interfaces add { 1.2 } tag 503
+
+# Create Self IPs
+create net self vlan502_self address 10.50.2.11/24 vlan vlan502 allow-service none
+create net self vlan503_self address 10.50.3.11/24 vlan vlan503 allow-service none
+
+# Create Default Route
+create net route default_route gw 10.50.3.254 network default
+
+# Configure DNS
+modify sys dns description none
+modify sys dns name-servers replace-all-with { 10.1.20.1 10.1.20.2 }
+
+# Configure NTP
+modify sys ntp timezone Australia/Brisbane
+modify sys ntp servers replace-all-with { ntp1.f5.demo ntp2.f5.demo }
+
+# Change root and admin password (if required)
+modify auth password root
+modify auth user admin prompt-for-password
+
+# Install License
+install sys license registration-key <registration-key>
+
+# Provision APM
+create cli transaction
+modify sys provision ltm level none
+modify sys provision apm level nominal
+submit cli transaction
+
+# APM SSL VPN Config
+load sys config merge from-terminal
+
+#Cut/Paste below and CTRL-D to submit
+ltm rule vpn_ccu_monitor_irule {
+when HTTP_REQUEST {
+  switch [string tolower [HTTP::path]] {
+    "/offline" {
+      table set monitor offline indef indef
+      HTTP::respond 200 content "offline"
+    }
+    "/online" {
+      table set monitor online indef indef
+      HTTP::respond 200 content "online"
+    }
+    "/monitor" {
+      set response [table lookup monitor]
+      HTTP::respond 200 content $response 
+    }
+    default { HTTP::close }
+  }
+}
+}
+
+create ltm profile tcp vpn_tcp_profile { defaults-from f5-tcp-progressive syn-cookie-enable disabled }
+create ltm profile udp vpn_udp_profile { defaults-from udp }
+create ltm profile http vpn_http_profile { defaults-from http oneconnect-transformations disabled }
+create ltm profile client-ssl f5.demo_clientssl defaults-from clientssl cert-key-chain replace-all-with { f5.demo { cert f5.demo_wildcard key f5.demo_wildcard chain lets_encrypt_bundle } }
+create apm profile connectivity vpn_cp adaptive-compression disabled compression disabled compress-gzip-level 0 client-policy replace-all-with { vpn_cp_clientpolicy { servers { { alias "SSL VPN" host f5.demo } } } }
+
+create apm resource webtop vpn_webtop { show-search false webtop-type network-access }
+create apm resource network-access vpn_na description "SSL VPN" 
+create apm resource leasepool vpn_leasepool { members replace-all-with { 10.200.0.1-10.200.31.254 } }
+modify apm resource network-access vpn_na leasepool-name vpn_leasepool
+modify apm resource network-access vpn_na compression none
+modify apm resource network-access vpn_na snat none
+modify apm resource network-access vpn_na preserve-source-port-strict all
+modify apm resource network-access vpn_na dns-primary 10.1.20.1
+modify apm resource network-access vpn_na dns-secondary 10.1.20.2
+modify apm resource network-access vpn_na dtls true
+
+# Split Tunneling - Optional
+modify apm resource network-access vpn_na split-tunneling true
+modify apm resource network-access vpn_na address-space-include-dns-name add { f5.demo }
+modify apm resource network-access vpn_na address-space-include-subnet add { { subnet 10.0.0.0/8 } { subnet 172.16.0.0/12 } { subnet 192.168.0.0/16 } }
+
+create apm aaa active-directory f5.demo_ad_aaa { domain f5.demo use-pool disabled admin-name ldap.admin admin-encrypted-password Password123 }
+
+create cli transaction
+create apm policy access-policy vpn_ap
+create apm profile access vpn_ap access-policy vpn_ap accept-languages add { en } log-settings replace-all-with  { default-log-setting }
+submit cli transaction
+
+create ltm virtual vpn_https_vs { destination 10.50.2.101:443 ip-protocol tcp profiles replace-all-with { vpn_tcp_profile vpn_http_profile f5.demo_clientssl } vlans-enabled vlans replace-all-with { vlan502 }  description "SSL VPN" }
+create ltm virtual vpn_dtls_vs { destination 10.50.2.101:4433 ip-protocol udp profiles replace-all-with { vpn_udp_profile f5.demo_clientssl vpn_cp } vlans-enabled vlans replace-all-with { vlan502 }  translate-port disabled source-port preserve-strict description "SSL VPN - DTLS" }
+create ltm virtual vpn_monitor_vs { destination 10.50.2.101:80 ip-protocol tcp profiles replace-all-with { tcp http } vlans-enabled vlans replace-all-with { vlan502 } rules { vpn_ccu_monitor_irule } description "SSL VPN - Monitor" }
