@@ -8,15 +8,15 @@
 when HTTP_REQUEST {
   switch [string tolower [HTTP::path]] {
     "/offline" {
-      table set monitor offline indef indef
+      table set -subtable ccu monitor offline indef indef
       HTTP::respond 200 content "offline"
     }
     "/online" {
-      table set monitor online indef indef
+      table set -subtable ccu monitor online indef indef
       HTTP::respond 200 content "online"
     }
     "/monitor" {
-      set response [table lookup monitor]
+      set response [table lookup -subtable ccu monitor]
       HTTP::respond 200 content $response 
     }
     default { HTTP::close }
