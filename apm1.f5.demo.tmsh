@@ -102,9 +102,9 @@ modify apm resource network-access vpn_na dns-secondary 10.1.20.2
 modify apm resource network-access vpn_na dtls true
 
 # Split Tunneling - Optional
-modify apm resource network-access vpn_na split-tunneling true
 modify apm resource network-access vpn_na address-space-include-dns-name add { f5.demo }
-modify apm resource network-access vpn_na address-space-include-subnet add { { subnet 10.0.0.0/8 } { subnet 172.16.0.0/12 } { subnet 192.168.0.0/16 } }
+modify apm resource network-access vpn_na address-space-include-subnet { { subnet 10.0.0.0/8 } { subnet 172.16.0.0/12 } { subnet 192.168.0.0/16 } }
+modify apm resource network-access vpn_na split-tunneling true
 
 create apm aaa active-directory f5.demo_ad_aaa { domain f5.demo use-pool disabled admin-name ldap.admin admin-encrypted-password Password123 }
 
