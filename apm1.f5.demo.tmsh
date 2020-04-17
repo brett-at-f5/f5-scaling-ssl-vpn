@@ -84,7 +84,7 @@ when HTTP_REQUEST {
 }
 }
 
-create ltm profile tcp vpn_tcp_profile { defaults-from f5-tcp-progressive syn-cookie-enable disabled }
+create ltm profile tcp vpn_tcp_profile { defaults-from f5-tcp-progressive }
 create ltm profile udp vpn_udp_profile { defaults-from udp }
 create ltm profile http vpn_http_profile { defaults-from http oneconnect-transformations disabled }
 create ltm profile client-ssl f5.demo_clientssl defaults-from clientssl cert-key-chain replace-all-with { f5.demo { cert f5.demo_wildcard key f5.demo_wildcard chain lets_encrypt_bundle } }
